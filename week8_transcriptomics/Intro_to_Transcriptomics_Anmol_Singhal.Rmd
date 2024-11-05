@@ -1,0 +1,131 @@
+---
+title: "Intro to Transcriptomics"
+author: Nicole Black, Wade Boohar, Kayla Xu
+date: 07/17/22
+updated: 10/18/24
+---
+
+***Deliverables***
+-Upload this R Notebook to your GitHub and submit the link to your Repo on Brightspace.
+-Include any graphs or figures created in this assignment in the folder with your R notebook with descriptive file names.
+
+Since this is an optional partner activity, it is okay if your answers are the same as your partner’s as long as everyone understands it and could explain it in their own words if asked. Each person must individually push their code to Github. *At the top of your R Notebook, write the name of you and your partner(s) as a comment.*
+
+***Complete the following coding activity and answer any following questions as comments in your R Notebook***
+
+In SummarizedExperiment Tutorial, you learned how to manipulate the SummarizedExperiment data structure and turn it into more readable dataframes, saving them as rna_counts, rna_clinical, and rna_genes. In this semi-guided assignment, you will use these dataframes to perform differential expression analysis based on tumor status.
+
+*Pre-Assignment*
+Use knitr function to set your working directory to your analysis_data folder in 490_cluster.
+```{r setup}
+ knitr::opts_knit$set(root.dir = normalizePath("~/490_cluster/analysis_data"))
+```
+
+If DESeq2 is not already installed, install it now
+```{r}
+if (!require("DESeq2", quietly = TRUE))
+BiocManager::install("DESeq2")
+```
+
+Load in all necessary packages
+```{r}
+if (!require("EnhancedVolcano", quietly = TRUE)) 
+    BiocManager::install("EnhancedVolcano")
+library(EnhancedVolcano)
+library(DESeq2)
+```
+
+
+
+*1*
+Read in the rna_clinical, rna_genes, and rna_counts dataframes which you made in the "SummarizedExperiment Guided Tutorial" R Notebook
+
+```{r}
+rna_clinical <- read.csv('~/490_cluster/analysis_data/BRCA_rna_clinical.csv')
+rna_genes <- read.csv('~/490_cluster/analysis_data/BRCA_rna_genes.csv')
+rna_counts <- read.csv('~/490_cluster/analysis_data/BRCA_rna_counts.csv')
+
+#Some additional preprocessing was needed to be done for my rna_counts df specifically to reformat the df properly.
+rownames(rna_counts) <- rna_counts$X
+rna_counts$X <- NULL
+
+row.names(rna_genes) <- rna_genes$gene_id
+rna_genes$X <- NULL
+
+```
+
+
+*2*
+In this assignment, you will run differential expression analysis comparing patient samples by whether the sample is from a tumor or normal tissue (this is the definition column in rna_clinical). You will need to choose a variable to control for covariance of: age and/or PAM50 subtype (paper_BRCA_Subtype_PAM50). 
+
+Manipulate those columns so that they are ready for differential expression analysis (hint: what kind of variables are they? what data type are they by default? do you need to handle unknown values?) Filter out genes with a total expression across all patients less than 1000.
+```{r}
+
+NA_age_mask <- !is.na(rna_clinical$age_at_index)
+rna_clinical <- rna_clinical[NA_age_mask, ]
+
+median_age <- median(rna_clinical$age_at_index)
+
+rna_clinical$age_category <- ifelse(as.numeric(rna_clinical$age_at_index) >= median_age, "Old", "Young")
+
+#rna_clinical$age_category <-- This was to check that the age_category column has the proper output
+
+rna_clinical$definition <- factor(rna_clinical$definition)
+#rna_clinical$age_category <- factor(rna_clinical$age_category)
+
+
+rna_counts <- rna_counts[, NA_age_mask]
+
+less_1000_mask <- rowSums(rna_counts) >= 1000 
+
+clean_counts <- rna_counts[less_1000_mask, ]
+clean_genes <- rna_genes[less_1000_mask, ]
+
+```
+
+
+*3*
+Perform the differential expression analysis, All you need to do is fill in the appropriate # terms
+```{r}
+dds <- DESeqDataSetFromMatrix(countData = clean_counts,
+                              colData = rna_clinical,
+                              design= ~age_category+definition)
+#Only need age_category and definition, can remove ajcc_pathologic_stage from command above
+dds_obj <- DESeq(dds)
+
+resultsNames(dds_obj)
+
+results <- results(dds_obj, format = "DataFrame", contrast = c("age_category", "Young", "Old"))
+
+results <- data.frame(results)
+```
+
+Prepare results dataframe for EnhancedVolcano plotting. Add two columns, "-log10(padj)" and "gene_name". Fill in these columns appropriately.
+```{r}
+results$gene_name <- clean_genes$gene_name
+results$'-log10(padj)' <- -log10(results$padj)
+
+```
+
+*4*
+Now we will use the EnhancedVolcano package to plot our results. The code is already completed and should run without adjustment if all code up to here is correct.
+```{r}
+EnhancedVolcano(results,
+                lab = results$gene_name,
+                x = 'log2FoldChange',
+                y = 'padj',
+                title = 'Expression in Young vs. Old Patients',
+                pointSize = 2.0,
+                labSize = 5.0)
+```
+
+*5*
+# Explain what genes from each part of the Volcano Plot mean in terms of their significance and up/down regulation. 
+top-right genes: upregulated in young patients and significant
+bottom-right genes: upregulated in young patients and insignificant
+top-left genes: downregulated in young and significant
+bottom-left genes: downregulated in young and insignificant
+top-middle genes: same expression and insignificant
+bottom-middle genes: same expression insignificant
+
+Save the picture of the volcano plot (using either ggsave() or right clicking and manually downloading the image and push this .Rmd and the image to GitHub)
